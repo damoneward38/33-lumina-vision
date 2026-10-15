@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<link rel="icon" href="data:,">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lumina Vision — Neural Engine AI</title>
@@ -81,6 +82,7 @@ body{font-family:'Inter','Segoe UI',system-ui,sans-serif;background:var(--bg);co
       </div>
     </div>
   </header>
+<div role="note" style="margin:8px 14px;padding:10px 14px;background:#211d30;color:#e9d5ff;border:1px solid #4c3c75;border-radius:8px;font-size:12px">API KEY NOTICE: live chat sends the key and prompt directly from this browser to OpenAI. Do not use a shared or production secret in this static page. Without a key, responses are a local demo simulation.</div>
 
   <aside class="sidebar">
     <ul class="nav">
@@ -365,7 +367,8 @@ class NeuralEngine {
       } catch (e) {
         if (e.code === 'AUTH_ERROR') { logger.error('Authentication failed — invalid or missing API key'); throw e; }
         if (e.code === 'RATE_LIMIT') { throw e; }
-        logger.warn('Live API call failed, falling back to local engine: ' + (e.message || e));
+        logger.error('Live API request failed; no simulated fallback was returned: ' + (e.message || e));
+        throw e;
       }
     }
 
