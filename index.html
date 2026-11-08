@@ -253,24 +253,6 @@ class StreamHandler {
   }
 }
 
-// ─── Simulated GPT-4o response library ─────────────
-const RESPONSE_DB = [
-  { match: ['SOLID', 'solid'], reply: 'SOLID stands for five design principles:\n\n1. Single Responsibility — a class should have one reason to change\n2. Open/Closed — open for extension, closed for modification\n3. Liskov Substitution — subtypes must be substitutable\n4. Interface Segregation — clients shouldn\'t depend on interfaces they don\'t use\n5. Dependency Inversion — depend on abstractions, not concretions\n\nUsed together they produce maintainable, testable architecture.' },
-  { match: ['typescript', 'ts example', 'first one'], reply: 'Single Responsibility Principle in TypeScript:\n\n```ts\n// BAD — handles both persistence and formatting\nclass ReportService {\n  generate(report: Report): string { /* ... */ }\n  save(report: Report): void { /* ... */ }\n}\n\n// GOOD — separated responsibilities\nclass ReportFormatter {\n  format(report: Report): string { /* ... */ }\n}\n\nclass ReportRepository {\n  persist(report: Report): void { /* ... */ }\n}\n```' },
-  { match: ['haiku', 'neural'], reply: 'layers pulse and hum —\nbackpropagation dreaming —\nweights align to light' },
-  { match: ['design pattern', 'json'], reply: '[{"name":"Singleton","use-case":"Shared service instance with global access"},{"name":"Factory","use-case":"Object creation decoupled from call site"},{"name":"Observer","use-case":"One-to-many state propagation with loose coupling"}]' },
-];
-
-function simulateReply(text) {
-  const lower = text.toLowerCase();
-  for (const item of RESPONSE_DB) {
-    for (const m of item.match) {
-      if (lower.includes(m)) return item.reply;
-    }
-  }
-  return 'Understood. I registered your input in conversation context.\n\nAnalysis: ' + text.length + ' characters parsed. If you\'d like a deeper technical answer, ask me about SOLID principles, TypeScript patterns, or request a one-shot completion in the tabs above.';
-}
-
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // ─── NeuralEngine Main ─────────────────────────────
@@ -372,27 +354,38 @@ class NeuralEngine {
       }
     }
 
-    // Simulated response (streaming or full)
-    const reply = simulateReply(messages[messages.length - 1].content);
-    if (this.config.stream) {
-      const tokens = reply.split(' ');
-      const result = await this.streamHandler.processStream(tokens, callbacks);
-      const promptTokens = this.tokenManager.countMessageTokens(messages);
-      return {
-        id: 'stream-' + Date.now(),
-        content: result.content,
-        model: this.config.model,
-        finishReason: result.finishReason,
-        usage: { promptTokens, completionTokens: result.completionTokens, totalTokens: promptTokens + result.completionTokens },
-        latencyMs: 0, timestamp: new Date()
-      };
+    // Real local Ollama (llama3.2) through the App Hub bridge
+    let reply;
+    try {
+      if (window.OllamaAI && typeof window.OllamaAI.chat === 'function') {
+        reply = await window.OllamaAI.chat(messages.map(m => ({ role: m.role, content: m.content })), {
+          model: 'llama3.2', max_tokens: this.config.maxTokens, temperature: this.config.temperature
+        });
+      } else {
+        const res = await fetch('http://localhost:8780/api/ai/chat', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            messages: messages.map(m => ({ role: m.role, content: m.content })),
+            stream: false, model: 'llama3.2',
+            options: { num_predict: this.config.maxTokens, temperature: this.config.temperature }
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        reply = data.message && data.message.content;
+      }
+    } catch (error) {
+      throw new Error('Local Ollama (llama3.2) unavailable: ' + (error.message || error) + '. Start Ollama and open this app from the App Hub.');
     }
+    if (callbacks && callbacks.onToken) callbacks.onToken(reply);
+    if (callbacks && callbacks.onComplete) callbacks.onComplete(reply);
+    const promptTokens = this.tokenManager.countMessageTokens(messages);
     return {
-      id: 'sim-' + Date.now(),
+      id: 'local-' + Date.now(),
       content: reply,
-      model: this.config.model,
+      model: 'llama3.2',
       finishReason: 'stop',
-      usage: { promptTokens: this.tokenManager.countMessageTokens(messages), completionTokens: this.tokenManager.countTextTokens(reply), totalTokens: this.tokenManager.countMessageTokens(messages) + this.tokenManager.countTextTokens(reply) },
+      usage: { promptTokens, completionTokens: this.tokenManager.countTextTokens(reply), totalTokens: promptTokens + this.tokenManager.countTextTokens(reply) },
       latencyMs: 0, timestamp: new Date()
     };
   }
